@@ -1,24 +1,36 @@
 version: '3'
+
+networks: 
+    laravel:
+        driver: bridge
+
 services:
     web:
         container_name: web
         image: nginx:stable
+        env_file: ./.env
         ports: 
           - 80:80
         volumes:
           # - ./:/var/www/html:delegated
-          - ./.docker/web/nginx.conf:/etc/nginx/conf.d/default.conf
+          - ./docker/web/nginx.conf:/etc/nginx/conf.d/default.conf
           - /var/www/html
         links:
           - application
         depends_on:
           - application
+        networks:
+          - laravel
 
     application:
         container_name: application
-        # image: php:8.1-fpm
+        build:
+          context: './docker/app'
+          dockerfile: Dockerfile
+        env_file: ./.env
         volumes:
           - /var/www/html
+          - ./.env:/var/www/html/.env
           # - ./:/var/www/html:delegated
           # - /Users/neerajsohal/lab/slate/slate:/var/www/html/vendor/neerajsohal/slate:delegated
         restart: always
@@ -29,33 +41,37 @@ services:
           - storage
           - mail
           - queue
-        build:
-          context: './.docker/app'
-          dockerfile: Dockerfile
+        networks:
+          - laravel
     
     database:
         container_name: database
-        image: 'mysql/mysql-server:8.0'
+        image: 'mariadb:11.0.2'
+        env_file: ./.env
         restart: always
         ports:
             - '${FORWARD_DB_PORT:-3306}:3306'
         environment:
-            MYSQL_ROOT_PASSWORD: 'root'
+            MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
             MYSQL_ROOT_HOST: "%"
-            MYSQL_DATABASE: 'electrik'
-            MYSQL_USER: 'root'
-            MYSQL_PASSWORD: ''
+            MYSQL_DATABASE: ${DB_DATABASE}
+            MYSQL_USER: ${DB_USERNAME}
+            MYSQL_PASSWORD: ${DB_PASSWORD}
             MYSQL_ALLOW_EMPTY_PASSWORD: 1
         volumes:
             - '/var/lib/mysql'
+            - ./.env:/var/www/html/.env
         healthcheck:
             test: ["CMD", "mysqladmin", "ping", "-p${DB_PASSWORD}"]
             retries: 3
             timeout: 5s
+        networks:
+          - laravel
 
     mail:
         container_name: mail
         image: mailhog/mailhog:latest
+        env_file: ./.env
         restart: always
         ports:
           - 1025:1025
@@ -63,10 +79,15 @@ services:
         command: ["-storage=maildir", "-maildir-path=/maildir"]
         volumes:
           - /maildir
+          - ./.env:/var/www/html/.env
           # - ./data/mailhog:/maildir
+        networks:
+          - laravel
+
     storage:
         container_name: storage
         image: minio/minio:latest
+        env_file: ./.env
         ports:
           - '9999:9999'
           - '9001:9001'
@@ -76,48 +97,64 @@ services:
           - CONSOLE_ACCESS_KEY=test
           - CONSOLE_SECRET_KEY=test
         command: server --address ":9999" --console-address ":9001" /data
+        healthcheck: 
+          disable: true
+        networks:
+          - laravel
 
     queue:
         container_name: queue
         image: redis:6.2-alpine
+        env_file: ./.env
         restart: always
         ports:
           - '${REDIS_PORT}:6379'
         command: redis-server --save 20 1 --loglevel warning --requirepass "${REDIS_PASSWORD}"
         volumes: 
+          - ./.env:/var/www/html/.env
           # - ./data/redis:/data
           - /data/redis
+        networks:
+          - laravel
 
 
     # https://stackoverflow.com/questions/60722553/run-laravel-queue-worker-in-docker
     worker:
         container_name: worker
+        env_file: ./.env
         build:
-            context: './.docker/worker'
+            context: './docker/worker'
             dockerfile: Dockerfile
         depends_on:
             - application
         volumes:
             - /var/www/html
+            - ./.env:/var/www/html/.env
             # - ./:/var/www/html:delegated
             # - /Users/neerajsohal/lab/slate/slate:/var/www/html/vendor/neerajsohal/slate:delegated
         # command: 
             # - supervisord
             # - supervisorctl start all
+        networks:
+          - laravel
               
     scheduler:
         container_name: scheduler
+        env_file: ./.env
         build:
-            context: './.docker/scheduler'
+            context: './docker/scheduler'
             dockerfile: Dockerfile
         depends_on:
             - application
         volumes:
             - /var/www/html
+            - ./.env:/var/www/html/.env
             # - ./:/var/www/html:delegated
             # - /Users/neerajsohal/lab/slate/slate:/var/www/html/vendor/neerajsohal/slate:delegated
         # command: 
         #     - cron
+        networks:
+          - laravel
               
     phpmyadmin:
         container_name: phpmyadmin
@@ -129,3 +166,5 @@ services:
             PMA_PASSWORD: ${DB_PASSWORD}
         ports:
           - "8080:80"
+        networks:
+          - laravel
